@@ -173,3 +173,59 @@
 - Tests follow black-box pattern — test against interfaces not implementation
 
 ---
+
+## Phase 5: Cross-Provider Review
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Role | Est. Tokens | Est. Cost |
+|-------|----------|-----|------|-------------|-----------|
+| O3 | OpenAI | zen MCP (codereview) | Code Reviewer | ~40,000 in + ~3,000 out | ~$0.80 |
+| Gemini 3 Pro | Google | zen MCP (secaudit) | Security Auditor (primary) | ~40,000 in + ~4,000 out | ~$0.60 |
+| GPT-5.2 | OpenAI | zen MCP (chat) | Security Auditor (secondary, substituting GLM-5) | ~15,000 in + ~6,000 out | ~$0.50 |
+| Gemini 2.5 Pro | Google | zen MCP (chat) | Full Context Review (substituting Kimi 2.5) | ~20,000 in + ~5,000 out | ~$0.40 |
+| Claude Opus 4.6 | Anthropic | Native | Orchestrator (investigation + synthesis) | ~60,000 | $0.00 |
+
+### Model Substitutions
+- **GLM-5 (Zhipu AI)** → GPT-5.2 (OpenAI): GLM-5 not available via OpenRouter. Used GPT-5.2 for secondary security opinion from different provider.
+- **Kimi 2.5 (Moonshot)** → Gemini 2.5 Pro (Google, 1M context): Kimi 2.5 not available via OpenRouter. Used Gemini 2.5 Pro for large-context full review.
+- **Provider diversity maintained**: 3 providers (Anthropic, OpenAI, Google) + DeepSeek attempted
+
+### Process
+1. Gathered all 64 backend code files + 10 test files + infrastructure files
+2. Launched 4 parallel reviews via zen MCP:
+   - O3 code review (codereview tool, 2-step with investigation)
+   - Gemini 3 Pro security audit (secaudit tool, 2-step with investigation)
+   - GPT-5.2 secondary security audit (chat tool, focused on additional findings)
+   - Gemini 2.5 Pro full context review (chat tool, holistic assessment)
+3. O3 external validation failed (OpenRouter data policy 404) — findings captured locally
+4. Gemini 3 Pro external validation failed (payload too large 413) — findings captured locally
+5. Initial DeepSeek R1 / Grok 4.1 calls failed (context limits) — substituted with GPT-5.2 and Gemini 2.5 Pro
+6. GPT-5.2 and Gemini 2.5 Pro reviews completed successfully
+7. Synthesized all findings into 3 review documents
+
+### Findings Summary
+| Review | Issues Found | Critical | High | Medium | Low |
+|--------|-------------|----------|------|--------|-----|
+| Code Review (O3) | 10 | 0 | 1 | 6 | 3 |
+| Security Audit (Gemini+GPT) | 19 | 1 | 6 | 8 | 4 |
+| Full Context (Gemini 2.5 Pro) | 12 | 2 | 2 | 4 | 4 |
+| **Total Unique** | **~29** | **1** | **6** | **13** | **9** |
+
+### Key Issues to Fix in Phase 6
+1. **CRITICAL**: Command injection defense gap in tmux send-keys fallback
+2. **HIGH**: Auth bypass for channel posts (effective_user is None)
+3. **HIGH**: Symlink attacks on file reads/writes
+4. **HIGH**: Path traversal via unsanitized engine in directory naming
+5. **HIGH**: TOCTOU + race conditions in file operations
+6. **HIGH**: Blocking I/O in async functions (run_monitor, factory_runner)
+7. **MEDIUM**: Missing `log_file_path` property on FactoryRun model
+8. **MEDIUM**: Deprecated API usage (datetime.utcnow, asyncio.get_event_loop)
+
+### Output
+- `artifacts/reviews/code-review.md` — 10 issues (O3)
+- `artifacts/reviews/security-audit.md` — 19 issues (Gemini 3 Pro + GPT-5.2)
+- `artifacts/reviews/full-context-review.md` — 12 areas (Gemini 2.5 Pro)
+
+---
