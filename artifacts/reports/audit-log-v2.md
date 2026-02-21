@@ -354,3 +354,89 @@ External validation calls to O3, Gemini 3 Pro, GPT-5.2, and Gemini 2.5 Pro hit O
 - Test files synced to `artifacts/code/backend/tests/`
 
 ---
+
+## Phase 7: Documentation, Deployment Guide, and Release
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Role | Est. Tokens | Est. Cost |
+|-------|----------|-----|------|-------------|-----------|
+| Claude Sonnet 4.6 | Anthropic | Task tool (subagent) | Docs and Deployer | ~50,000 in + ~30,000 out | $0.00 |
+| Gemini 2.5 Pro | Google | zen MCP (codereview) | Quality Gate Scorer | ~15,000 in + ~5,000 out | ~$0.30 |
+| Claude Opus 4.6 | Anthropic | Native | Orchestrator | ~40,000 | $0.00 |
+
+### Documentation Generated
+| File | Lines | Description |
+|------|-------|-------------|
+| `README.md` | 439 | v2.0 overview, features, architecture, tech stack, quick start, CLI/Telegram commands, env vars, testing, security |
+| `CHANGELOG.md` | 167 | keepachangelog format, v2.0.0 + v1.0.0 entries |
+| `DEPLOYMENT.md` | 1,010 | 3 deployment options + installer, env vars, API keys, troubleshooting |
+| `deploy.sh` | 585 | Bash deployment script (docker/manual/install modes) |
+| **Total** | **2,201** | |
+
+### Quality Gate
+- **Score**: 98/100 (threshold: 97) — **PASS**
+- **Completeness**: 25/25
+- **Clarity**: 25/25
+- **Consistency**: 24/25 (minor: CLI command count wording fixed)
+- **Robustness**: 24/25
+
+### Output
+- `artifacts/code/backend/README.md` — Updated to v2.0
+- `artifacts/code/backend/CHANGELOG.md` — Created
+- `artifacts/docs/DEPLOYMENT.md` — Updated to v2.0
+- `artifacts/release/deploy.sh` — Updated to v2.0
+
+---
+
+## Pipeline Summary
+
+### Total Models Used
+| Provider | Models Used | Roles | Est. Total Cost |
+|----------|------------|-------|-----------------|
+| **Anthropic** | Claude Opus 4.6, Claude Sonnet 4.6 | Orchestrator, Architect, Backend Implementer, Docs and Deployer | $0.00 (Max subscription) |
+| **Google** | Gemini 3 Pro, Gemini 2.5 Pro | Requirements Analyst, Quality Gate Scorer, Security Auditor, Full Context Reviewer | ~$2.70 |
+| **OpenAI** | GPT-5.2, O3 | Black Box Tester, Quality Gate Scorer, Code Reviewer, Security Auditor | ~$3.80 |
+| **Meta** | Llama 3.3 70B | Brainstorm Participant | ~$0.02 |
+| **Alibaba** | Qwen3 Coder | Brainstorm Participant | ~$0.01 |
+| **Perplexity** | Sonar Deep Research | Research Agent (free providers) | ~$0.10 |
+| **Total** | **10 unique models** | **12 roles** | **~$6.63** |
+
+### Quality Gate Summary
+| Phase | Gate Type | Score | Result | Iterations |
+|-------|-----------|-------|--------|------------|
+| Phase 1: Requirements | Gated | 97/100 | PASS | 2 (78 -> 97) |
+| Phase 2: Brainstorm | Ungated | — | PASS | 1 |
+| Phase 3: Architecture | Gated | 100/100 | PASS | 2 (72 -> 100) |
+| Phase 4: Implementation | Ungated | — | PASS | 1 |
+| Phase 5: Review | Ungated | — | 26 issues | 1 |
+| Phase 6: Test/Fix | Test-gated | 264/264 | PASS | 1 fix cycle |
+| Phase 7: Docs/Release | Gated | 98/100 | PASS | 1 |
+
+### Codebase Statistics
+| Metric | Value |
+|--------|-------|
+| Implementation files | 140 Python files |
+| Implementation lines | 21,201 |
+| Test files | 25 |
+| Test cases | 264 (all passing) |
+| Documentation files | 4 (2,201 lines) |
+| Database tables | 18 (9 v1.0 + 9 v2.0) |
+| CLI commands | 13 + subcommands |
+| Telegram commands | 18 |
+| LLM providers supported | 15+ |
+| Total pipeline cost | ~$6.63 |
+
+### Major Decisions Log
+1. **Tier 3 selected** — 30+ commands, 15+ integrations, dual UI, self-modification
+2. **Two-service split** — factory-bot.service + factory-worker.service (all models agreed)
+3. **LiteLLM hybrid** — LiteLLM for OpenAI-compatible + custom adapters for others
+4. **Typer + Rich for CLI** — Unanimous across all brainstorm models
+5. **PostgreSQL LISTEN/NOTIFY** — Event-driven cross-service without external broker
+6. **Branch-based self-research** — Test-gated, never auto-merge
+7. **Bash bootstrap -> Python installer** — Not pure bash
+8. **Docker evaluation: hybrid** — Docker for DB + deployed projects, host for bot/engines
+
+---
+*Pipeline completed 2026-02-21. Factory Control Bot v2.0.0 ready for release.*
