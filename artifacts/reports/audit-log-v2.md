@@ -105,3 +105,43 @@
 - `~/knowledge-base/research/free-llm-providers-2026-02.md` — 13 providers documented
 
 ---
+
+## Phase 2: Multi-Model Brainstorm
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Est. Tokens | Est. Cost |
+|-------|----------|-----|-------------|-----------|
+| Gemini 3 Pro | Google | zen MCP (chat) | ~15,000 in + ~8,000 out | ~$0.35 |
+| GPT-5.2 | OpenAI | zen MCP (chat) | ~15,000 in + ~10,000 out | ~$0.60 |
+| Llama 3.3 70B | Meta | zen MCP (chat) | ~3,000 in + ~2,000 out | ~$0.02 |
+| Qwen3 Coder | Alibaba | zen MCP (chat) | ~1,000 in + ~200 out | ~$0.01 |
+| Claude Opus 4.6 | Anthropic | Native | ~30,000 | $0.00 |
+
+### Consensus
+- **Architecture**: Two-service split (bot + worker) with event-driven FSM orchestrator (all agree on shared core + thin adapters)
+- **Provider layer**: LiteLLM for OpenAI-compatible providers + custom adapters for others (hybrid approach)
+- **CLI**: Typer + Rich (unanimous)
+- **State sync**: PostgreSQL LISTEN/NOTIFY (Gemini + GPT agree)
+- **Scanner**: Parallel async probing with caching (all agree)
+- **Self-research**: Branch-based, test-gated, never auto-merge (all agree)
+
+### Key Decisions
+1. Two-service split: `factory-bot.service` (Telegram) + `factory-worker.service` (orchestrator)
+2. LiteLLM + custom adapter hybrid (not fully custom, not fully LiteLLM)
+3. Tenacity for retry logic, Pydantic Settings for config
+4. Bash bootstrap → Python installer (not pure bash)
+5. Capability tags on ModelInfo for role-matching (GPT-5.2 recommendation adopted)
+6. Remote backup escalated from SHOULD to MUST (Gemini recommendation adopted)
+7. Docker container reaper for zombie cleanup (Gemini recommendation adopted)
+
+### Dissenting Opinions
+- Gemini 3 Pro: Replace tmux with Docker exec for engines (DEFERRED to v3.0)
+- Llama 3.3: Use Celery for task queue (REJECTED — asyncio + DB sufficient)
+- Gemini 3 Pro: Prefers fat container over hybrid (NOTED, but tmux requires host access)
+
+### Output
+- `artifacts/architecture/brainstorm-v2.md` — 10 sections, tech stack, risk matrix, consensus/dissent documented
+
+---
