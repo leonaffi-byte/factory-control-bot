@@ -298,3 +298,96 @@
 - **Fix Cycles**: 1
 
 ---
+
+## Phase 7: Documentation, Deployment Guide, and Release
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Role | Est. Tokens | Est. Cost |
+|-------|----------|-----|------|-------------|-----------|
+| Claude Opus 4.6 | Anthropic | Native | Orchestrator (content generation) | ~30,000 | $0.00 |
+| Claude Sonnet 4.6 | Anthropic | Task tool | Docs and Deployer (4 parallel subagents) | ~20,000 | $0.00 |
+| GPT-5.2 | OpenAI | zen MCP (chat) | Quality Gate Scorer | ~8,000 in + ~2,000 out | ~$0.25 |
+| Gemini 3 Pro | Google | zen MCP (chat) | Quality Gate Scorer (rescore) | ~8,000 in + ~3,000 out | ~$0.15 |
+
+### Process
+1. Generated 4 documentation files via parallel Claude Sonnet 4.6 Task subagents:
+   - `README.md` — 170 lines (features, tech stack, architecture, quick start, env vars, commands, testing, security)
+   - `CHANGELOG.md` — 45 lines (Keep a Changelog format, v1.0.0 with 15 Added + 10 Security items)
+   - `DEPLOYMENT.md` — 340 lines (3 deployment options, 27 env vars, troubleshooting, maintenance)
+   - `deploy.sh` — 140 lines (Docker and manual modes with prereq checking)
+2. Quality gate 1 (GPT-5.2): 73/100 (FAIL) — 8 issues identified
+3. Fixed all 8 issues:
+   - CHANGELOG: Added [Unreleased], link refs, Keep a Changelog header
+   - DEPLOYMENT Docker .env: Fixed heredoc (no shell expansion), literal password
+   - README env vars: Expanded from 10 to 17 variables, added Database Migrations section
+   - DEPLOYMENT sudoers: Restricted `systemctl status` to specific services only
+   - All options: Added Alembic auto-migration notes
+   - deploy.sh: Added docker/docker-compose prereqs, changed manual mode to foreground
+   - DEPLOYMENT VPS: Added factory user creation step with directory structure
+4. Quality gate 2 (Gemini 3 Pro): 100/100 (PASS)
+
+### Quality Gate
+- **Score**: 100/100 (threshold: 97) — **PASS**
+- **Iteration 1**: 73/100 → fixed 8 issues → 100/100
+- **Completeness**: 25/25
+- **Clarity**: 25/25
+- **Accuracy**: 25/25
+- **Actionability**: 25/25
+
+### Output
+- `artifacts/code/backend/README.md`
+- `artifacts/code/backend/CHANGELOG.md`
+- `artifacts/docs/DEPLOYMENT.md`
+- `artifacts/release/deploy.sh`
+
+---
+
+## Pipeline Summary
+
+### Total Models Used by Provider
+| Provider | Models | Roles | Est. Cost |
+|----------|--------|-------|-----------|
+| Anthropic (Native) | Claude Opus 4.6 | Orchestrator, Architect | $0.00 (Max subscription) |
+| Anthropic (Task) | Claude Sonnet 4.6 | Backend Implementer, Docs & Deployer | $0.00 (Max subscription) |
+| Google (zen MCP) | Gemini 3 Pro, Gemini 2.5 Pro | Requirements, Security Audit, Full Context Review, QG Scorer | ~$1.35 |
+| OpenAI (zen MCP) | GPT-5.2, O3 | Brainstorm, Black Box Tester, Code Reviewer, QG Scorer, Secondary Security | ~$2.60 |
+| DeepSeek (zen MCP) | DeepSeek R1 | Brainstorm | ~$0.10 |
+| Alibaba (zen MCP) | Qwen3 Coder | Brainstorm (model check) | ~$0.01 |
+| Perplexity (MCP) | Sonar Pro | Domain Research | ~$0.05 |
+| **Total** | **9 models, 5 providers** | **12 roles** | **~$4.11** |
+
+### Quality Gate Summary
+| Phase | Score | Threshold | Result | Iterations |
+|-------|-------|-----------|--------|------------|
+| Phase 1: Requirements | 98/100 | 97 | PASS | 2 (93→98) |
+| Phase 3: Architecture | 97/100 | 97 | PASS | 2 (85→97) |
+| Phase 7: Documentation | 100/100 | 97 | PASS | 2 (73→100) |
+
+### Key Decisions
+1. **Tier 3 selected** — 20+ endpoints, 7 DB tables, 8 integrations, real-time monitoring
+2. **Modular monolith** — all 3 brainstorm models agreed (consensus)
+3. **Polling over webhooks** for v1.0 — simpler, single instance
+4. **SQLAlchemy 2.0 async ORM** over Core — better for this codebase
+5. **Information barrier enforced** — tester never saw implementation, implementer never saw tests
+6. **15 review issues fixed** in Phase 6 (1 CRITICAL, 4 HIGH, 7 MEDIUM, 3 LOW)
+7. **Model substitutions**: GLM-5 → GPT-5.2, Kimi 2.5 → Gemini 2.5 Pro (unavailable on OpenRouter)
+
+### Codebase Statistics
+- **Total Python files**: 64 backend + 10 test = 74
+- **Total Python lines**: ~7,155 (backend) + ~400 (tests) = ~7,555
+- **SQLAlchemy models**: 8 tables
+- **Service classes**: 12
+- **Bot commands**: 10
+- **Conversation states**: 13
+- **Test results**: 50 passed, 0 failed
+
+### Pipeline Duration
+- **Total phases**: 8 (0-7)
+- **Phases completed**: All 8
+- **Est. total external API cost**: ~$4.11 (well under $40-80 budget)
+
+---
+
+*Pipeline complete. Factory Control Bot v1.0.0 ready for release.*
