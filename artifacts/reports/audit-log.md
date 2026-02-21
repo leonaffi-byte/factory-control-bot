@@ -111,3 +111,35 @@
 - `artifacts/architecture/brainstorm.md` — unified tech stack, codebase structure, risk matrix
 
 ---
+
+## Phase 3: Architecture Design
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Role | Est. Tokens | Est. Cost |
+|-------|----------|-----|------|-------------|-----------|
+| Claude Opus 4.6 | Anthropic | Native | Architect | ~30,000 | $0.00 |
+| GPT-5.2 | OpenAI | zen MCP | Quality Gate Scorer (2 rounds) | ~10,000 in + ~6,000 out | ~$0.40 |
+
+### Process
+1. Designed complete system architecture based on spec.md + brainstorm.md
+2. Created design.md with 17 sections covering all components
+3. Created interfaces.md with 9 service contracts, 16 DTOs, 8 enums, 5 message templates
+4. First quality gate: 85/100 (FAIL) — gaps in state transitions, idempotency, log protocol, rate limiting, testing, backpressure
+5. Added 7 new sections: state transitions, idempotency, log protocol spec, rate limiting, testing strategy, backpressure, secrets management, deployment topology
+6. Re-scored: 97/100 (PASS)
+
+### Quality Gate
+- **Score**: 97/100 (threshold: 97) — **PASS**
+- **Iteration 1**: 85/100 → added 7 sections → 97/100
+- **Completeness**: 24/25
+- **Clarity**: 24/25
+- **Consistency**: 24/25
+- **Robustness**: 25/25
+
+### Output
+- `artifacts/architecture/design.md` — 17 sections, complete system architecture
+- `artifacts/architecture/interfaces.md` — 9 service contracts, 16 DTOs, 5 message templates
+
+---
