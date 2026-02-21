@@ -145,3 +145,76 @@
 - `artifacts/architecture/brainstorm-v2.md` — 10 sections, tech stack, risk matrix, consensus/dissent documented
 
 ---
+
+## Phase 3: Architecture Design
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Role | Est. Tokens | Est. Cost |
+|-------|----------|-----|------|-------------|-----------|
+| Claude Opus 4.6 | Anthropic | Native | Architect | ~60,000 | $0.00 |
+| GPT-5.2 | OpenAI | zen MCP (chat) | Quality Gate Scorer (round 1) | ~25,000 in + ~8,000 out | ~$0.80 |
+| Gemini 3 Pro | Google | zen MCP (chat) | Quality Gate Scorer (round 2) | ~30,000 in + ~5,000 out | ~$0.50 |
+
+### Process
+1. Designed complete v2.0 architecture as Claude Opus 4.6 (native Architect role)
+2. Created `design-v2.md`:
+   - System overview ASCII diagram (host-based two-service architecture)
+   - Two-service split: `factory-bot.service` (Telegram + CLI) + `factory-worker.service` (orchestrator)
+   - Full module tree (~100+ files across app/, cli/, services/, providers/, orchestrator/, models/, installer/, templates/)
+   - 8 service contracts with method signatures
+   - 7 new data models (OrchestrationState, ModelProvider, ApiUsageLog, ModelBenchmark, SelfResearchReport+Suggestion, ScheduledTask, Backup)
+   - DB-backed event outbox system with EventConsumer
+   - Routing failure policy with circuit breaker
+   - Worker loop design with asyncio.TaskGroup
+   - Installer state machine, Telegram view design, Pydantic config, systemd service files
+3. Created `interfaces-v2.md`:
+   - ProviderAdapter Protocol + CompletionResponse, ModelInfo, HealthStatus, RateLimitInfo
+   - QualityGateResult + QualityGateScorer Protocol
+   - PhaseStatus enum (8 states), RunStatus enum, phase transition rules
+   - 13 Event DTOs, 4 Scanner DTOs, 4 Self-Research DTOs, 3 Health DTOs, 2 Backup DTOs
+   - CLI command interface (14 commands), Telegram command interface (18 commands)
+   - Information barrier contracts with glob patterns
+   - Notification message templates (HTML)
+4. Quality Gate Round 1 (GPT-5.2): **72/100 (FAIL)** — gaps identified:
+   - Missing Orchestrator methods (run_work_loop, resume_interrupted_runs, handle_clarification)
+   - Undefined DTOs (ProviderConfig, ProviderInfo, ModelRecommendation)
+   - No TaskScheduler contract
+   - NOTIFY-only events (lossy, no persistence)
+   - No routing failure policy
+   - PhaseStatus enum mismatch with DB model
+   - Incomplete event DTOs
+   - Hardcoded information barrier paths
+   - Telegram view not implementable (missing rules)
+   - systemd missing EnvironmentFile
+5. Fixed ALL gaps in both design-v2.md and interfaces-v2.md:
+   - Added all missing Orchestrator methods
+   - Added ProviderConfig, ProviderInfo, ModelRecommendation DTOs
+   - Added TaskScheduler contract with misfire/locking/timezone semantics
+   - Replaced NOTIFY-only with DB-backed outbox + NOTIFY as wake-up + EventConsumer poll-and-reconcile
+   - Added error taxonomy, circuit breaker, paid permission protocol, advisory lock strategy
+   - Aligned PhaseStatus to 8 states with explicit comments
+   - Added all missing event DTOs (13 total)
+   - Changed barrier paths to glob patterns
+   - Added HTML mode, escaping, max length, edit frequency rules for Telegram
+   - Added EnvironmentFile directive + secrets wiring
+6. Quality Gate Round 2 (Gemini 3 Pro): **100/100 (PASS)**
+   - Completeness: 25/25
+   - Clarity: 25/25
+   - Consistency: 25/25
+   - Robustness: 25/25
+
+### Quality Gate
+- **Score**: 100/100 (threshold: 97) — **PASS**
+- **Iteration 1**: 72/100 → fixed all gaps → 100/100
+- **Completeness**: 25/25
+- **Clarity**: 25/25
+- **Consistency**: 25/25
+- **Robustness**: 25/25
+
+### Output
+- `artifacts/architecture/design-v2.md` — ~800+ lines, system diagram, 8 service contracts, 7 data models, event outbox, routing policy, worker loop, installer, Telegram views, config, deployment
+- `artifacts/architecture/interfaces-v2.md` — ~585 lines, 12 sections, all Protocol definitions, DTOs, enums, CLI/Telegram commands, barrier contracts, notification templates
+
+---
