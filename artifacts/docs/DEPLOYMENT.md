@@ -493,28 +493,50 @@ crontab -l
 
 ---
 
-## One-Line Installer
+## One-Line Installer (Fresh VPS)
 
-For a fully automated VPS setup, use the built-in installer. It detects your system, installs all dependencies, sets up PostgreSQL, installs engine CLIs, configures Docker, and creates both systemd services.
-
-```bash
-# From the backend directory with venv activated
-factory install
-```
-
-Or use the deploy script in install mode:
+For a completely fresh Ubuntu 22.04+ VPS, run this single command as root:
 
 ```bash
-# From artifacts/release/
-bash deploy.sh install
+curl -fsSL https://raw.githubusercontent.com/leonaffi-byte/factory-control-bot/main/artifacts/release/install.sh | sudo bash
 ```
 
-The installer runs these steps in order:
-1. `postgres` — Check or install PostgreSQL and create the database
-2. `python` — Create virtualenv and install requirements
-3. `engines` — Install engine CLIs (claude, gemini, aider, opencode)
-4. `docker` — Install Docker if not present
-5. `systemd` — Create and enable factory-bot and factory-worker services
+This will:
+1. Install all system dependencies (Python 3.12, PostgreSQL 16, Docker, tmux, git)
+2. Create the `factory` system user with correct permissions
+3. Clone the repository to `/home/factory/factory-control-bot`
+4. Set up a Python virtualenv and install all dependencies
+5. Create the PostgreSQL database with a random password
+6. Prompt you for your Telegram Bot Token and Admin ID
+7. Generate the `.env` file
+8. Install and start both systemd services (`factory-bot` + `factory-worker`)
+9. Set up daily backup cron job
+
+At the end, it prints the generated database password — save it.
+
+### Alternative: If You Already Have the Repo
+
+If you've already cloned the repository:
+
+```bash
+# Full VPS setup (installs system deps + systemd services)
+sudo bash artifacts/release/install.sh
+
+# Or use the deploy script in install mode
+bash artifacts/release/deploy.sh install
+```
+
+### Post-Install: Using the CLI
+
+```bash
+# Switch to factory user
+sudo -u factory -i
+
+# The factory CLI is available
+factory --help
+factory scan-models
+factory health
+```
 
 ---
 
