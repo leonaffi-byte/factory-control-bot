@@ -76,3 +76,38 @@
 - `artifacts/requirements/spec.md` — 18 sections, 8 DB tables, 13 commands, 28 callback patterns, 5 state machines, 17 edge cases
 
 ---
+
+## Phase 2: Multi-Model Brainstorm
+- **Timestamp**: 2026-02-21
+- **Tier**: 3
+
+### Models Used
+| Model | Provider | Via | Est. Tokens | Est. Cost |
+|-------|----------|-----|-------------|-----------|
+| Gemini 3 Pro | Google | zen MCP | ~8,000 in + ~6,000 out | ~$0.20 |
+| GPT-5.2 | OpenAI | zen MCP | ~8,000 in + ~8,000 out | ~$0.40 |
+| DeepSeek R1 | DeepSeek | zen MCP | ~8,000 in + ~5,000 out | ~$0.10 |
+| Qwen3 Coder | Alibaba | zen MCP | ~2,000 in + ~200 out | ~$0.01 |
+| Claude Opus 4.6 | Anthropic | Native | ~15,000 | $0.00 |
+
+### Consensus
+- **Architecture**: Modular monolith with async event-driven patterns (all 3 agree)
+- **Database**: SQLAlchemy 2.0 async + asyncpg + Alembic (all 3 agree)
+- **Docker**: aiodocker for async container management (all 3 agree)
+- **Top Risk**: Telegram FloodWait from message edits (all 3 agree)
+
+### Key Decisions
+1. Polling (not webhook) for v1.0 — simpler, single instance
+2. LogWatcher pattern with RunMonitor supervisor (Gemini + GPT-5.2 synthesis)
+3. PTB BasePersistence backed by PostgreSQL (Gemini recommendation)
+4. Layered codebase structure (DeepSeek) with interface separation (GPT-5.2)
+
+### Dissenting Opinions
+- GPT-5.2 recommends webhook over polling (deferred to v2)
+- Gemini recommends inode tracking for log files (adopted)
+- DeepSeek prefers SQLAlchemy Core over ORM (not adopted — ORM better for this codebase)
+
+### Output
+- `artifacts/architecture/brainstorm.md` — unified tech stack, codebase structure, risk matrix
+
+---
