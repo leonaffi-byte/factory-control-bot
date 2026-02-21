@@ -41,6 +41,14 @@ class Settings(BaseSettings):
     perplexity_api_key: str = Field("", description="Perplexity API key for research")
     github_token: str = Field("", description="GitHub token for repo management")
 
+    # ── v2.0 API Keys ─────────────────────────────────────────
+    nvidia_api_key: str = Field("", description="NVIDIA NIM API key")
+    together_api_key: str = Field("", description="Together AI API key")
+    cerebras_api_key: str = Field("", description="Cerebras Cloud API key")
+    sambanova_api_key: str = Field("", description="SambaNova Cloud API key")
+    fireworks_api_key: str = Field("", description="Fireworks AI API key")
+    mistral_api_key: str = Field("", description="Mistral AI API key")
+
     # ── Factory ───────────────────────────────────────────────
     factory_root_dir: Path = Field(
         Path("/home/factory/projects"),
@@ -81,6 +89,22 @@ class Settings(BaseSettings):
     # ── Logging ───────────────────────────────────────────────
     log_level: str = Field("INFO", description="Application log level")
 
+    # ── v2.0 Routing ──────────────────────────────────────────
+    default_routing_mode: str = Field(
+        "api_direct",
+        description="Model routing mode: api_direct | openrouter | clink",
+    )
+
+    # ── v2.0 Backup ───────────────────────────────────────────
+    backup_dir: Path = Field(
+        Path("/home/factory/backups"),
+        description="Directory for automated backups",
+    )
+
+    # ── v2.0 Health ───────────────────────────────────────────
+    disk_warning_percent: int = Field(80, description="Disk usage percent to trigger warning")
+    disk_critical_percent: int = Field(90, description="Disk usage percent to trigger critical alert")
+
     @field_validator("database_url")
     @classmethod
     def validate_database_url(cls, v: str) -> str:
@@ -117,6 +141,12 @@ class Settings(BaseSettings):
             "google_api_key": self.mask_key(self.google_api_key),
             "perplexity_api_key": self.mask_key(self.perplexity_api_key),
             "github_token": self.mask_key(self.github_token),
+            "nvidia_api_key": self.mask_key(self.nvidia_api_key),
+            "together_api_key": self.mask_key(self.together_api_key),
+            "cerebras_api_key": self.mask_key(self.cerebras_api_key),
+            "sambanova_api_key": self.mask_key(self.sambanova_api_key),
+            "fireworks_api_key": self.mask_key(self.fireworks_api_key),
+            "mistral_api_key": self.mask_key(self.mistral_api_key),
         }
 
 

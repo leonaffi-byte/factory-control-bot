@@ -1,0 +1,648 @@
+<GENERATED-CODE>
+1. Create `tests/conftest.py` with shared fixtures:
+   - `mock_settings` dynamically introspects `app.config.Settings` and fills all fields with deterministic test values (works for dataclasses, pydantic v1/v2, or simple `__init__` signatures).
+   - `sample_project`, `sample_run`, `sample_user` dict fixtures.
+2. Create `tests/unit/test_provider_base.py` to validate DTO construction and field behavior (plus minimal introspection-based checks for `ProviderInfo` and `ModelRecommendation`).
+3. Create `tests/unit/test_state_machine.py` to validate enums, transition table, gated/ungated sets, and `validate_transition` behavior (including invalid/terminal transitions).
+4. Create `tests/unit/test_information_barrier.py` to validate role-based access decisions and `filter_artifacts`.
+5. Create `tests/unit/test_token_counter.py` to validate token estimation basics, context fitting, and margin logic (using monkeypatch to make the margin test deterministic).
+
+<NEWFILE: tests/conftest.py>
+"""Shared fixtures for all tests.
+
+These fixtures are black-box friendly: `mock_settings` introspects the real
+`app.config.Settings` at runtime (dataclass / pydantic / signature) and supplies
+deterministic test values for all fields it can detect.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import inspect
+from datetime import datetime, timezone
+from enum import Enum
+from pathlib import Path
+from typing import Any, get_args, get_origin
+
+import pytest
+
+
+def _is_optional(annotation: Any) -> bool:
+	origin = get_origin(annotation)
+	if origin is None:
+		return False
+	args = get_args(annotation)
+	return origin is type(None) or (origin is getattr(__import__("typing"), "Union") and type(None) in args)  # type: ignore[attr-defined]
+
+
+def _strip_optional(annotation: Any) -> Any:
+	origin = get_origin(annotation)
+	args = get_args(annotation)
+	if origin is getattr(__import__("typing"), "Union") and type(None) in args:  # type: ignore[attr-defined]
+		non_none = [a for a in args if a is not type(None)]
+		return non_none[0] if non_none else str
+	return annotation
+
+
+def _value_for_type(name: str, annotation: Any, tmp_path: Path) -> Any:
+	"""Best-effort deterministic values for common types."""
+	if annotation is None or annotation is inspect._empty:
+		# Fallback by name heuristics
+		lname = name.lower()
+		if "url" in lname:
+			return "https://example.test"
+		if "path" in lname or "dir" in lname:
+			return str(tmp_path)
+		if "key" in lname or "token" in lname or "secret" in lname:
+			return "test-secret"
+		if lname.startswith("is_") or lname.endswith("_enabled"):
+			return True
+		return f"test_{name}"
+
+	# Optional[T] -> value for T
+	if _is_optional(annotation):
+		annotation = _strip_optional(annotation)
+
+	origin = get_origin(annotation)
+	args = get_args(annotation)
+
+	# Containers
+	if origin in (list, tuple, set, dict):
+		if origin is list:
+			return []
+		if origin is tuple:
+			return ()
+		if origin is set:
+			return set()
+		if origin is dict:
+			return {}
+
+	# Common scalars
+	if annotation is str:
+		lname = name.lower()
+		if "url" in lname:
+			return "https://example.test"
+		if "env" in lname and "var" in lname:
+			return "TEST_ENV_VAR"
+		if "provider" in lname:
+			return "test-provider"
+		return f"test_{name}"
+	if annotation is int:
+		return 1
+	if annotation is float:
+		return 1.0
+	if annotation is bool:
+		return True
+	if annotation is datetime:
+		return datetime(2020, 1, 1, tzinfo=timezone.utc)
+	if annotation is Path:
+		return tmp_path / f"{name}.txt"
+
+	# Enums
+	try:
+		if isinstance(annotation, type) and issubclass(annotation, Enum):
+			return list(annotation)[0]
+	except Exception:
+		pass
+
+	# Fallback for unknown annotations
+	return f"test_{name}"
+
+
+def _build_kwargs_for_settings(Settings: type, tmp_path: Path) -> dict[str, Any]:
+	"""Extract fields from dataclass / pydantic / __init__ signature and fill values."""
+	kwargs: dict[str, Any] = {}
+
+	# dataclass
+	try:
+		if dataclasses.is_dataclass(Settings):
+			for f in dataclasses.fields(Settings):
+				ann = f.type
+				if f.default is not dataclasses.MISSING:
+					# Prefer explicit non-None defaults only when meaningful; otherwise fill deterministic.
+					if f.default is not None:
+						continue
+				if f.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
+					continue
+				kwargs[f.name] = _value_for_type(f.name, ann, tmp_path)
+			return kwargs
+	except Exception:
+		pass
+
+	# pydantic v2: model_fields
+	if hasattr(Settings, "model_fields"):
+		model_fields = getattr(Settings, "model_fields")
+		try:
+			for name, field in model_fields.items():
+				ann = getattr(field, "annotation", inspect._empty)
+				kwargs[name] = _value_for_type(name, ann, tmp_path)
+			return kwargs
+		except Exception:
+			pass
+
+	# pydantic v1: __fields__
+	if hasattr(Settings, "__fields__"):
+		fields = getattr(Settings, "__fields__")
+		try:
+			for name, field in fields.items():
+				ann = getattr(field, "outer_type_", inspect._empty)
+				kwargs[name] = _value_for_type(name, ann, tmp_path)
+			return kwargs
+		except Exception:
+			pass
+
+	# Plain class: __init__ signature
+	try:
+		sig = inspect.signature(Settings)
+		for pname, param in sig.parameters.items():
+			if pname == "self":
+				continue
+			if param.default is not inspect._empty:
+				# Use caller-supplied values only for required/empty defaults.
+				continue
+			kwargs[pname] = _value_for_type(pname, param.annotation, tmp_path)
+	except Exception:
+		# No usable signature
+		return {}
+
+	return kwargs
+
+
+@pytest.fixture
+def mock_settings(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+	"""A Settings instance populated with deterministic values.
+
+	This is intentionally robust to differing Settings implementations.
+	"""
+	from app.config import Settings
+
+	kwargs = _build_kwargs_for_settings(Settings, tmp_path)
+
+	# Provide commonly-used env vars if Settings reads them implicitly.
+	monkeypatch.setenv("TEST_ENV_VAR", "1")
+	monkeypatch.setenv("OPENAI_API_KEY", "test-openai-key")
+	monkeypatch.setenv("ANTHROPIC_API_KEY", "test-anthropic-key")
+
+	try:
+		if kwargs:
+			return Settings(**kwargs)
+		return Settings()
+	except TypeError as e:
+		raise AssertionError(
+			f"Failed to construct Settings. Discovered kwargs={sorted(kwargs.keys())}. "
+			f"Error: {e}"
+		) from e
+	except Exception as e:
+		raise AssertionError(f"Failed to construct Settings with kwargs={kwargs!r}. Error: {e}") from e
+
+
+@pytest.fixture
+def sample_project() -> dict[str, Any]:
+	return {
+		"id": "proj_123",
+		"name": "Test Project",
+		"repo_url": "https://example.test/repo.git",
+		"default_branch": "main",
+		"created_at": "2020-01-01T00:00:00Z",
+	}
+
+
+@pytest.fixture
+def sample_run() -> dict[str, Any]:
+	return {
+		"id": "run_123",
+		"project_id": "proj_123",
+		"status": "running",
+		"phase": 1,
+		"iteration": 0,
+		"created_at": "2020-01-01T00:00:00Z",
+	}
+
+
+@pytest.fixture
+def sample_user() -> dict[str, Any]:
+	return {
+		"id": "user_123",
+		"email": "tester@example.test",
+		"role": "tester",
+		"created_at": "2020-01-01T00:00:00Z",
+	}
+</NEWFILE>
+
+<NEWFILE: tests/unit/test_provider_base.py>
+"""Unit tests for provider base DTOs (black-box, per interfaces-v2.md)."""
+
+from __future__ import annotations
+
+import dataclasses
+from datetime import datetime, timezone
+from typing import Any
+
+import pytest
+
+from app.providers.base import (
+	CompletionResponse,
+	HealthStatus,
+	ModelInfo,
+	ModelRecommendation,
+	ProviderConfig,
+	ProviderInfo,
+	RateLimitInfo,
+)
+
+
+def _instantiate_dataclass(cls: type, overrides: dict[str, Any] | None = None) -> Any:
+	"""Instantiate an unknown dataclass by filling required fields with generic values."""
+	assert dataclasses.is_dataclass(cls), f"{cls} is expected to be a dataclass"
+	overrides = overrides or {}
+
+	kwargs: dict[str, Any] = {}
+	for f in dataclasses.fields(cls):
+		if f.name in overrides:
+			kwargs[f.name] = overrides[f.name]
+			continue
+		# Skip fields that have defaults/default_factories
+		if f.default is not dataclasses.MISSING:
+			continue
+		if f.default_factory is not dataclasses.MISSING:  # type: ignore[comparison-overlap]
+			continue
+
+		# Best-effort based on type
+		ft = f.type
+		if ft is str:
+			kwargs[f.name] = f"test_{f.name}"
+		elif ft is int:
+			kwargs[f.name] = 1
+		elif ft is float:
+			kwargs[f.name] = 1.0
+		elif ft is bool:
+			kwargs[f.name] = True
+		else:
+			# Fallback
+			kwargs[f.name] = None
+
+	return cls(**kwargs)
+
+
+class TestCompletionResponse:
+	def test_can_create_with_all_fields(self):
+		resp = CompletionResponse(
+			content="hello",
+			model="gpt-test",
+			provider="test-provider",
+			tokens_input=12,
+			tokens_output=34,
+			cost=0.001,
+			latency_ms=123,
+			finish_reason="stop",
+			tool_calls=[{"name": "tool", "args": {"x": 1}}],
+			raw_response={"id": "abc"},
+		)
+		assert resp.content == "hello"
+		assert resp.model == "gpt-test"
+		assert resp.provider == "test-provider"
+		assert resp.tokens_input == 12
+		assert resp.tokens_output == 34
+		assert resp.cost == pytest.approx(0.001)
+		assert resp.latency_ms == 123
+		assert resp.finish_reason == "stop"
+		assert resp.tool_calls == [{"name": "tool", "args": {"x": 1}}]
+		assert resp.raw_response == {"id": "abc"}
+
+
+class TestModelInfo:
+	def test_capability_tags_roundtrip(self):
+		mi = ModelInfo(
+			name="model-a",
+			display_name="Model A",
+			provider="test-provider",
+			context_window=128000,
+			supports_tools=True,
+			supports_streaming=True,
+			supports_vision=False,
+			is_free=False,
+			cost_per_1k_input=0.5,
+			cost_per_1k_output=1.0,
+			capability_tags=["reasoning", "code"],
+		)
+		assert mi.capability_tags == ["reasoning", "code"]
+		assert mi.supports_tools is True
+		assert mi.context_window == 128000
+
+
+class TestHealthStatus:
+	def test_healthy_state(self):
+		hs = HealthStatus(
+			is_healthy=True,
+			latency_ms=42,
+			error=None,
+			last_checked=datetime(2020, 1, 1, tzinfo=timezone.utc),
+		)
+		assert hs.is_healthy is True
+		assert hs.error is None
+		assert hs.latency_ms == 42
+
+	def test_unhealthy_state(self):
+		hs = HealthStatus(is_healthy=False, latency_ms=999, error="timeout", last_checked=None)
+		assert hs.is_healthy is False
+		assert hs.error == "timeout"
+		assert hs.last_checked is None
+
+
+class TestRateLimitInfo:
+	def test_remaining_limits_roundtrip(self):
+		rl = RateLimitInfo(
+			rpm_limit=60,
+			rpd_limit=1000,
+			rpm_remaining=12,
+			rpd_remaining=345,
+			tpm_limit=120000,
+			reset_at=datetime(2020, 1, 1, tzinfo=timezone.utc),
+		)
+		assert rl.rpm_limit == 60
+		assert rl.rpm_remaining == 12
+		assert rl.rpd_limit == 1000
+		assert rl.rpd_remaining == 345
+		assert rl.tpm_limit == 120000
+		assert isinstance(rl.reset_at, datetime)
+
+
+class TestProviderConfig:
+	@pytest.mark.parametrize(
+		"adapter_type, openai_compatible",
+		[
+			("openai", True),
+			("anthropic", False),
+			("local", False),
+		],
+	)
+	def test_different_adapter_types(self, adapter_type: str, openai_compatible: bool):
+		pc = ProviderConfig(
+			name=f"{adapter_type}-provider",
+			display_name=f"{adapter_type.title()} Provider",
+			api_base_url="https://example.test/api",
+			api_key_env_var="TEST_API_KEY",
+			is_free=False,
+			priority_score=10,
+			openai_compatible=openai_compatible,
+			adapter_type=adapter_type,
+			config={"timeout": 30},
+		)
+		assert pc.adapter_type == adapter_type
+		assert pc.openai_compatible is openai_compatible
+		assert pc.config == {"timeout": 30}
+
+
+class TestModelRecommendation:
+	def test_has_score_and_reason(self):
+		# We don't assume the full schema beyond "score" and "reason" existing.
+		rec = _instantiate_dataclass(
+			ModelRecommendation,
+			overrides={
+				"score": 0.99,
+				"reason": "best overall",
+			},
+		)
+		assert hasattr(rec, "score")
+		assert hasattr(rec, "reason")
+		assert rec.score == pytest.approx(0.99)
+		assert rec.reason == "best overall"
+
+
+class TestProviderInfo:
+	def test_provider_info_is_dataclass_and_instantiable(self):
+		assert dataclasses.is_dataclass(ProviderInfo), "ProviderInfo should be a dataclass"
+		obj = _instantiate_dataclass(ProviderInfo, overrides={"name": "p1"} if "name" in {f.name for f in dataclasses.fields(ProviderInfo)} else {})
+		# Minimal sanity: should expose something identifiable (common fields like name/display_name)
+		for attr in ("name", "display_name", "provider"):
+			if hasattr(obj, attr):
+				assert getattr(obj, attr) is not None
+				break
+</NEWFILE>
+
+<NEWFILE: tests/unit/test_state_machine.py>
+"""Unit tests for orchestrator state machine transitions (black-box, per interfaces-v2.md)."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.orchestrator.state_machine import (
+	GATED_PHASES,
+	PHASE_TRANSITIONS,
+	UNGATED_PHASES,
+	PhaseStatus,
+	validate_transition,
+)
+
+
+class TestPhaseStatus:
+	def test_enum_values(self):
+		assert PhaseStatus.PENDING.value == "pending"
+		assert PhaseStatus.RUNNING.value == "running"
+		assert PhaseStatus.SCORING.value == "scoring"
+		assert PhaseStatus.PASSED.value == "passed"
+		assert PhaseStatus.FAILED.value == "failed"
+		assert PhaseStatus.ITERATING.value == "iterating"
+		assert PhaseStatus.ESCALATED.value == "escalated"
+		assert PhaseStatus.SKIPPED.value == "skipped"
+
+	def test_gated_and_ungated_sets_exact(self):
+		assert GATED_PHASES == {1, 3, 7}
+		assert UNGATED_PHASES == {0, 2, 4, 5, 6}
+		assert GATED_PHASES.isdisjoint(UNGATED_PHASES)
+
+
+class TestTransitionsTable:
+	def test_phase_transitions_map_contains_expected_keys(self):
+		# Exact keys are part of the spec and ensure no status is omitted.
+		assert set(PHASE_TRANSITIONS.keys()) == {
+			PhaseStatus.PENDING,
+			PhaseStatus.RUNNING,
+			PhaseStatus.SCORING,
+			PhaseStatus.PASSED,
+			PhaseStatus.FAILED,
+			PhaseStatus.ITERATING,
+			PhaseStatus.ESCALATED,
+			PhaseStatus.SKIPPED,
+		}
+
+	@pytest.mark.parametrize(
+		"current,target",
+		[
+			(PhaseStatus.PENDING, PhaseStatus.RUNNING),
+			(PhaseStatus.RUNNING, PhaseStatus.SCORING),
+			(PhaseStatus.RUNNING, PhaseStatus.SKIPPED),
+			(PhaseStatus.SCORING, PhaseStatus.PASSED),
+			(PhaseStatus.SCORING, PhaseStatus.FAILED),
+			(PhaseStatus.FAILED, PhaseStatus.ITERATING),
+			(PhaseStatus.FAILED, PhaseStatus.ESCALATED),
+			(PhaseStatus.ITERATING, PhaseStatus.RUNNING),
+			(PhaseStatus.PASSED, PhaseStatus.PENDING),
+			(PhaseStatus.SKIPPED, PhaseStatus.PENDING),
+		],
+	)
+	def test_validate_transition_true_for_valid_edges(self, current: PhaseStatus, target: PhaseStatus):
+		assert validate_transition(current, target) is True
+		assert target in PHASE_TRANSITIONS[current]
+
+	@pytest.mark.parametrize(
+		"current,target",
+		[
+			# Specifically called out in the prompt: RUNNING -> PASSED is not valid directly.
+			(PhaseStatus.RUNNING, PhaseStatus.PASSED),
+			# Terminal: ESCALATED -> anything invalid
+			(PhaseStatus.ESCALATED, PhaseStatus.PENDING),
+			(PhaseStatus.ESCALATED, PhaseStatus.RUNNING),
+			(PhaseStatus.ESCALATED, PhaseStatus.SCORING),
+			(PhaseStatus.ESCALATED, PhaseStatus.PASSED),
+			(PhaseStatus.ESCALATED, PhaseStatus.FAILED),
+			(PhaseStatus.ESCALATED, PhaseStatus.ITERATING),
+			(PhaseStatus.ESCALATED, PhaseStatus.SKIPPED),
+			# Other invalid examples
+			(PhaseStatus.PENDING, PhaseStatus.SCORING),
+			(PhaseStatus.SCORING, PhaseStatus.RUNNING),
+			(PhaseStatus.PASSED, PhaseStatus.RUNNING),
+			(PhaseStatus.SKIPPED, PhaseStatus.SCORING),
+		],
+	)
+	def test_validate_transition_false_for_invalid_edges(self, current: PhaseStatus, target: PhaseStatus):
+		assert validate_transition(current, target) is False
+</NEWFILE>
+
+<NEWFILE: tests/unit/test_information_barrier.py>
+"""Unit tests for the information barrier (black-box, per interfaces-v2.md)."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.orchestrator.information_barrier import (
+	IMPLEMENTER_ALLOWED,
+	IMPLEMENTER_BLOCKED,
+	TESTER_ALLOWED,
+	TESTER_BLOCKED,
+	InformationBarrier,
+)
+
+
+class TestInformationBarrierAccess:
+	@pytest.fixture
+	def barrier(self) -> InformationBarrier:
+		return InformationBarrier()
+
+	@pytest.mark.parametrize(
+		"file_path",
+		[
+			"artifacts/requirements/spec-v2.md",
+			"artifacts/requirements/spec_foo.md",
+			"artifacts/architecture/design-overview.md",
+			"artifacts/architecture/interfaces-v2.md",
+		],
+	)
+	def test_implementer_can_read_allowed_docs(self, barrier: InformationBarrier, file_path: str):
+		assert barrier.validate_access("implementer", file_path, "read") is True
+
+	def test_implementer_cannot_read_tests_artifacts(self, barrier: InformationBarrier):
+		assert barrier.validate_access("implementer", "artifacts/tests/test_anything.py", "read") is False
+
+	@pytest.mark.parametrize(
+		"file_path",
+		[
+			"artifacts/requirements/spec-v2.md",
+			"artifacts/architecture/interfaces-v2.md",
+		],
+	)
+	def test_tester_can_read_spec_and_interfaces(self, barrier: InformationBarrier, file_path: str):
+		assert barrier.validate_access("tester", file_path, "read") is True
+
+	def test_tester_cannot_read_code_artifacts(self, barrier: InformationBarrier):
+		assert barrier.validate_access("tester", "artifacts/code/main.py", "read") is False
+
+	def test_tester_cannot_read_design_docs(self, barrier: InformationBarrier):
+		assert barrier.validate_access("tester", "artifacts/architecture/design-overview.md", "read") is False
+
+
+class TestInformationBarrierListsAndFiltering:
+	@pytest.fixture
+	def barrier(self) -> InformationBarrier:
+		return InformationBarrier()
+
+	def test_constants_are_non_empty(self):
+		assert IMPLEMENTER_ALLOWED
+		assert TESTER_ALLOWED
+		assert IMPLEMENTER_BLOCKED
+		assert TESTER_BLOCKED
+
+	def test_get_allowed_files_returns_role_specific_patterns(self, barrier: InformationBarrier):
+		implementer_patterns = barrier.get_allowed_files("implementer")
+		tester_patterns = barrier.get_allowed_files("tester")
+
+		assert isinstance(implementer_patterns, list)
+		assert isinstance(tester_patterns, list)
+
+		# Should at least include the patterns published as constants
+		for p in IMPLEMENTER_ALLOWED:
+			assert p in implementer_patterns
+		for p in TESTER_ALLOWED:
+			assert p in tester_patterns
+
+	def test_filter_artifacts_removes_blocked_files(self, barrier: InformationBarrier):
+		artifacts = {
+			"artifacts/requirements/spec-v2.md": "spec",
+			"artifacts/architecture/interfaces-v2.md": "interfaces",
+			"artifacts/architecture/design-overview.md": "design",
+			"artifacts/tests/test_anything.py": "tests",
+			"artifacts/code/main.py": "code",
+		}
+
+		impl_view = barrier.filter_artifacts("implementer", artifacts)
+		assert "artifacts/tests/test_anything.py" not in impl_view
+		# Implementer is allowed spec/design/interfaces; may or may not include code depending on policy, but
+		# at least the blocked tests must be removed.
+		assert "artifacts/requirements/spec-v2.md" in impl_view
+		assert "artifacts/architecture/interfaces-v2.md" in impl_view
+		assert "artifacts/architecture/design-overview.md" in impl_view
+
+		tester_view = barrier.filter_artifacts("tester", artifacts)
+		assert "artifacts/code/main.py" not in tester_view
+		assert "artifacts/architecture/design-overview.md" not in tester_view
+		assert "artifacts/requirements/spec-v2.md" in tester_view
+		assert "artifacts/architecture/interfaces-v2.md" in tester_view
+</NEWFILE>
+
+<NEWFILE: tests/unit/test_token_counter.py>
+"""Unit tests for token counting utilities (black-box, per interfaces-v2.md)."""
+
+from __future__ import annotations
+
+import pytest
+
+from app.utils.token_counter import estimate_tokens, fits_in_context
+
+
+class TestEstimateTokens:
+	def test_empty_string_is_zero(self):
+		assert estimate_tokens("") == 0
+
+	def test_non_empty_text_is_positive(self):
+		assert estimate_tokens("hello world") > 0
+
+
+class TestFitsInContext:
+	def test_short_text_fits_large_context(self):
+		assert fits_in_context("short text", 128000) is True
+
+	def test_very_large_text_does_not_fit_small_context(self):
+		assert fits_in_context("x" * 500000, 1000) is False
+
+	def test_margin_parameter_is_applied(self, monkeypatch: pytest.MonkeyPatch):
+		# Make behavior deterministic by controlling estimate_tokens used by fits_in_context.
+		import app.utils.token_counter as tc
+
+		monkeypatch.setattr(tc, "estimate_tokens", lambda _text: 900)
+
+		assert tc.fits_in_context("anything", 1000, margin=0.95) is True  # 900 <= 950
+		assert tc.fits_in_context("anything", 1000, margin=0.80) is False  # 900 > 800
+</NEWFILE>
+</GENERATED-CODE>

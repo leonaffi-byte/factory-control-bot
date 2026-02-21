@@ -20,6 +20,7 @@ class RunStatus(str, enum.Enum):
     PAUSED = "paused"
     COMPLETED = "completed"
     FAILED = "failed"
+    ESCALATED = "escalated"
 
 
 class FactoryRun(TimestampMixin, Base):
@@ -53,11 +54,21 @@ class FactoryRun(TimestampMixin, Base):
     github_url: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     created_by: Mapped[int] = mapped_column(BigInteger, default=0)
 
+    # v2.0 fields
+    interface_source: Mapped[str] = mapped_column(String(20), default="telegram", nullable=False)
+    orchestrator_config_json: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
     # Relationships
     project = relationship("Project", back_populates="runs", lazy="selectin")
     events = relationship(
         "FactoryEvent", back_populates="run", lazy="selectin",
         cascade="all, delete-orphan",
+    )
+    orchestration_state = relationship(
+        "OrchestrationState",
+        back_populates="run",
+        uselist=False,
+        lazy="selectin",
     )
 
     def __repr__(self) -> str:
