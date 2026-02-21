@@ -7,11 +7,14 @@ from collections import defaultdict
 
 class ProviderRateLimiter:
     def __init__(self) -> None:
+        import datetime
         self._requests: dict[str, list[float]] = defaultdict(list)  # provider -> timestamps
         self._daily_counts: dict[str, int] = defaultdict(int)
         self._daily_tokens: dict[str, int] = defaultdict(int)
         self._limits: dict[str, dict] = {}  # provider -> {rpm, rpd, tpm}
-        self._last_reset_date: str = ""
+        # Initialise to today so the first check_allowed call does NOT
+        # trigger a spurious reset that would wipe freshly recorded counts.
+        self._last_reset_date: str = datetime.date.today().isoformat()
 
     def set_limits(self, provider_name: str, rpm: int = 0, rpd: int = 0, tpm: int = 0) -> None:
         self._limits[provider_name] = {"rpm": rpm, "rpd": rpd, "tpm": tpm}

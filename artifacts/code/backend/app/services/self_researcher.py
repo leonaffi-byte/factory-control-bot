@@ -254,9 +254,10 @@ class SelfResearcher:
         except Exception:
             pass
 
-        # Snapshot a few key files for context
+        # Snapshot a few key files for context.
+        # config.py is intentionally excluded: it contains API key references
+        # and secrets-handling logic that must never be sent to external models.
         key_files = [
-            self._factory_root / "app" / "config.py",
             self._factory_root / "app" / "services" / "__init__.py",
             self._factory_root / "app" / "orchestrator" / "state_machine.py",
         ]
@@ -320,11 +321,26 @@ class SelfResearcher:
 
         return suggestions
 
+    @staticmethod
+    def _sanitize_branch_segment(text: str) -> str:
+        """Replace any character that is not alphanumeric, hyphen, or dot with '-'.
+
+        This prevents git branch injection via suggestion titles that contain
+        shell-special characters or path separators.
+        """
+        import re
+        return re.sub(r"[^a-zA-Z0-9.\-]", "-", text)
+
     def _create_git_branch(
         self, branch_name: str, suggestion: SelfResearchSuggestion
     ) -> None:
         """Create a git branch and add a stub commit for the suggestion."""
         repo_root = self._factory_root.parent
+
+        # Sanitize the suggestion title used in the branch name and commit
+        # message to prevent injection via untrusted model-generated content.
+        safe_title = self._sanitize_branch_segment(suggestion.title[:60])
+
         subprocess.run(
             ["git", "checkout", "-b", branch_name],
             cwd=str(repo_root),
@@ -348,7 +364,7 @@ class SelfResearcher:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "commit", "-m", f"self-research: {suggestion.title[:60]}"],
+            ["git", "commit", "-m", f"self-research: {safe_title}"],
             cwd=str(repo_root),
             check=True,
             capture_output=True,

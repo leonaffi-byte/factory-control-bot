@@ -305,35 +305,50 @@ class BackupService:
         return h.hexdigest()
 
     @staticmethod
+    def _parse_db_url(db_url: str) -> tuple[str, str, str, str, str]:
+        """Parse a SQLAlchemy database URL into (user, password, host, port, dbname).
+
+        Uses urllib.parse so that percent-encoded characters (e.g. special chars
+        in passwords) are handled correctly, and never crashes on edge-case URLs
+        that defeat naive regex patterns.
+        """
+        import os
+        from urllib.parse import unquote, urlparse
+
+        parsed = urlparse(db_url)
+        user = unquote(parsed.username or "")
+        password = unquote(parsed.password or "")
+        host = parsed.hostname or "localhost"
+        port = str(parsed.port or 5432)
+        dbname = parsed.path.lstrip("/")
+        if not user or not dbname:
+            raise ValueError(f"Cannot parse database URL: {db_url!r}")
+        return user, password, host, port, dbname
+
+    @staticmethod
     def _run_pg_dump(db_url: str, output_path: Path) -> None:
         """Run pg_dump and gzip the output."""
-        import re
+        import os
 
-        # Extract DSN components from the SQLAlchemy URL
-        # Format: postgresql+asyncpg://user:pass@host:port/db
-        pattern = (
-            r"postgresql(?:\+\w+)?://(?P<user>[^:]+):(?P<pass>[^@]+)"
-            r"@(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db>.+)"
-        )
-        m = re.match(pattern, db_url)
-        if not m:
-            raise ValueError(f"Cannot parse database URL for pg_dump: {db_url}")
+        user, password, host, port, dbname = BackupService._parse_db_url(db_url)
 
-        env = {
-            "PGPASSWORD": m.group("pass"),
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-        }
+        # Merge PGPASSWORD into the *existing* process environment so that
+        # other variables required by pg_dump (e.g. PATH, LD_LIBRARY_PATH)
+        # are preserved.  Replacing env entirely can break pg_dump on some
+        # systems where the binary is not on /usr/bin.
+        env = {**os.environ, "PGPASSWORD": password}
+
         cmd = [
             "pg_dump",
-            "-h", m.group("host"),
-            "-p", m.group("port") or "5432",
-            "-U", m.group("user"),
-            "-d", m.group("db"),
+            "-h", host,
+            "-p", port,
+            "-U", user,
+            "-d", dbname,
             "-F", "p",   # plain text
         ]
         with open(output_path, "wb") as out:
             dump = subprocess.run(
-                cmd, env=env, capture_output=True, check=True
+                cmd, env=env, capture_output=True, check=True, timeout=300
             )
             # gzip manually
             gz = subprocess.run(
@@ -341,45 +356,39 @@ class BackupService:
                 input=dump.stdout,
                 capture_output=True,
                 check=True,
+                timeout=300,
             )
             out.write(gz.stdout)
 
     @staticmethod
     def _run_pg_restore(db_url: str, input_path: Path) -> None:
         """Decompress and pipe to psql."""
-        import re
+        import os
 
-        pattern = (
-            r"postgresql(?:\+\w+)?://(?P<user>[^:]+):(?P<pass>[^@]+)"
-            r"@(?P<host>[^:/]+)(?::(?P<port>\d+))?/(?P<db>.+)"
-        )
-        m = re.match(pattern, db_url)
-        if not m:
-            raise ValueError(f"Cannot parse database URL for pg_restore: {db_url}")
+        user, password, host, port, dbname = BackupService._parse_db_url(db_url)
 
-        env = {
-            "PGPASSWORD": m.group("pass"),
-            "PATH": "/usr/bin:/bin:/usr/local/bin",
-        }
+        # Merge into existing environment (same rationale as _run_pg_dump)
+        env = {**os.environ, "PGPASSWORD": password}
 
         # Decompress
         gz = subprocess.run(
             ["gunzip", "-c", str(input_path)],
             capture_output=True,
             check=True,
+            timeout=300,
         )
 
         # Restore
         cmd = [
             "psql",
-            "-h", m.group("host"),
-            "-p", m.group("port") or "5432",
-            "-U", m.group("user"),
-            "-d", m.group("db"),
+            "-h", host,
+            "-p", port,
+            "-U", user,
+            "-d", dbname,
         ]
         subprocess.run(
             cmd, input=gz.stdout, env=env,
-            capture_output=True, check=True,
+            capture_output=True, check=True, timeout=300,
         )
 
     @staticmethod
