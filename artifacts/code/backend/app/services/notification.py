@@ -28,6 +28,61 @@ PHASE_NAMES = {
 }
 
 
+class _TokenBucket:
+    """Token bucket for rate limiting."""
+
+    def __init__(self, capacity: float, rate: float) -> None:
+        self.capacity = capacity
+        self.tokens = capacity
+        self.rate = rate
+        self.last_refill = time.monotonic()
+
+    def _refill(self) -> None:
+        now = time.monotonic()
+        elapsed = now - self.last_refill
+        self.tokens = min(self.capacity, self.tokens + elapsed * self.rate)
+        self.last_refill = now
+
+    def consume(self) -> bool:
+        self._refill()
+        if self.tokens >= 1.0:
+            self.tokens -= 1.0
+            return True
+        return False
+
+
+class TelegramRateLimiter:
+    """
+    Token bucket rate limiter for Telegram messages.
+
+    Global: 25 tokens/sec, burst 30
+    Per-chat: 0.8 tokens/sec, burst 3
+    """
+
+    def __init__(self) -> None:
+        self._global_bucket = _TokenBucket(capacity=30, rate=25.0)
+        self._chat_buckets: dict[int, _TokenBucket] = {}
+        self._per_chat_rate = 0.8
+        self._per_chat_burst = 3
+
+    def can_send(self, chat_id: int) -> bool:
+        """Check if a message can be sent to this chat."""
+        if chat_id not in self._chat_buckets:
+            self._chat_buckets[chat_id] = _TokenBucket(
+                capacity=self._per_chat_burst, rate=self._per_chat_rate
+            )
+
+        if not self._chat_buckets[chat_id].consume():
+            return False
+
+        if not self._global_bucket.consume():
+            # Refund the per-chat token
+            self._chat_buckets[chat_id].tokens += 1.0
+            return False
+
+        return True
+
+
 class MessageSession:
     """Tracks the state of a live-updating message."""
 
@@ -44,7 +99,7 @@ class MessageSession:
         if now - self.last_edit_time < self.min_edit_interval:
             return False
 
-        text_hash = hashlib.md5(new_text.encode()).hexdigest()
+        text_hash = hashlib.sha256(new_text.encode()).hexdigest()
         if text_hash == self.last_text_hash:
             return False
 
@@ -53,7 +108,7 @@ class MessageSession:
     def mark_edited(self, text: str) -> None:
         """Mark that the message was just edited."""
         self.last_edit_time = time.time()
-        self.last_text_hash = hashlib.md5(text.encode()).hexdigest()
+        self.last_text_hash = hashlib.sha256(text.encode()).hexdigest()
 
 
 class NotificationService:

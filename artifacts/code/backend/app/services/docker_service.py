@@ -58,12 +58,12 @@ class DockerService:
         except Exception as e:
             raise DockerError(f"Failed to list containers: {e}") from e
 
-        result = []
-        for container in containers:
-            info = await self._container_to_info(container)
-            result.append(info)
-
-        return result
+        # Fetch stats in parallel for all containers
+        result = await asyncio.gather(
+            *(self._container_to_info(c) for c in containers),
+            return_exceptions=True,
+        )
+        return [r for r in result if isinstance(r, ContainerInfo)]
 
     async def start_container(self, container_id: str) -> None:
         """Start a stopped container."""

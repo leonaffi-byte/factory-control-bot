@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 # Project name regex: lowercase letters, numbers, hyphens
 # Must start with a letter, end with letter or number, 3-50 chars
@@ -53,6 +54,12 @@ def validate_project_name(name: str) -> tuple[bool, str]:
     return True, ""
 
 
+def is_valid_project_name(name: str) -> bool:
+    """Check if a project name is valid. Returns True/False."""
+    valid, _ = validate_project_name(name)
+    return valid
+
+
 def sanitize_user_input(text: str) -> str:
     """
     Strip factory marker patterns from user input to prevent injection.
@@ -78,6 +85,13 @@ def validate_telegram_id(value: str) -> tuple[bool, int | None, str]:
         return True, telegram_id, ""
     except ValueError:
         return False, None, "Invalid Telegram ID. Must be a number."
+
+
+def mask_api_key(key: str) -> str:
+    """Mask an API key for safe display — show first 4 + last 4 chars."""
+    if len(key) <= 8:
+        return "****"
+    return f"{key[:4]}...{key[-4:]}"
 
 
 def validate_setting_value(

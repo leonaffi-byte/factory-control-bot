@@ -141,26 +141,36 @@ class RunMonitor:
 
                 # Read log file
                 try:
-                    if not os.path.exists(log_file):
+                    def _read_log(path: str, off: int) -> tuple[str, int] | None:
+                        """Read log file with symlink protection and bounded reads."""
+                        # Symlink protection: verify resolved path stays within factory root
+                        real_path = os.path.realpath(path)
+                        factory_root = str(self._settings.factory_root_dir.resolve())
+                        if not real_path.startswith(factory_root + os.sep) and real_path != factory_root:
+                            return None
+
+                        if not os.path.exists(real_path):
+                            return None
+
+                        fsize = os.path.getsize(real_path)
+                        if fsize < off:
+                            off = 0
+                        if fsize <= off:
+                            return None
+
+                        max_read = 256 * 1024  # 256KB cap per poll
+                        with open(real_path, "r", encoding="utf-8") as fh:
+                            fh.seek(off)
+                            content = fh.read(max_read)
+                            new_off = fh.tell()
+                        return (content, new_off)
+
+                    result_data = await asyncio.to_thread(_read_log, log_file, offset)
+                    if result_data is None:
                         consecutive_empty += 1
                         continue
 
-                    file_size = os.path.getsize(log_file)
-
-                    # Handle file rotation
-                    if file_size < offset:
-                        logger.info("log_file_rotated", run_id=str(run.id))
-                        offset = 0
-
-                    if file_size <= offset:
-                        consecutive_empty += 1
-                        continue
-
-                    # Read new content
-                    with open(log_file, "r", encoding="utf-8") as f:
-                        f.seek(offset)
-                        new_content = f.read()
-                        offset = f.tell()
+                    new_content, offset = result_data
 
                     if not new_content:
                         consecutive_empty += 1

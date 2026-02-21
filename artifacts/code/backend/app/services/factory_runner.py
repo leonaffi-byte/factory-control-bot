@@ -6,7 +6,7 @@ import asyncio
 import json
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import UUID
@@ -68,7 +68,15 @@ class FactoryRunner:
         5. Start factory command in tmux
         6. Record run in database
         """
+        # Validate engine before any path construction
+        if engine not in ENGINE_COMMANDS:
+            raise ValueError(f"Unknown engine: {engine}")
+
         project_dir = self._factory_root / f"{project.name}-{engine}"
+        # Verify resolved path stays within factory root
+        if not project_dir.resolve().is_relative_to(self._factory_root.resolve()):
+            raise ValueError("Path traversal detected")
+
         session_name = f"{project.name}-{engine}"
 
         # 1. Create project directory structure
@@ -92,7 +100,7 @@ class FactoryRunner:
                 current_phase=0,
                 tmux_session=session_name,
                 project_dir=str(project_dir),
-                started_at=datetime.utcnow(),
+                started_at=datetime.now(timezone.utc),
                 created_by=created_by,
             )
             session.add(run)
@@ -124,10 +132,10 @@ class FactoryRunner:
             if not run:
                 raise ValueError(f"Run {run_id} not found")
 
-        # Touch stop file
+        # Touch stop file (non-blocking)
         if run.project_dir:
             stop_file = Path(run.project_dir) / ".factory-stop"
-            stop_file.touch()
+            await asyncio.to_thread(stop_file.touch)
 
         # Wait for graceful shutdown
         await asyncio.sleep(5)
@@ -158,7 +166,7 @@ class FactoryRunner:
                 raise ValueError(f"Run {run_id} not found or no project dir")
 
         pause_file = Path(run.project_dir) / ".factory-pause"
-        pause_file.touch()
+        await asyncio.to_thread(pause_file.touch)
 
         async with self._session_factory() as session:
             await session.execute(
@@ -203,7 +211,7 @@ class FactoryRunner:
                 .where(FactoryRun.id == run_id)
                 .values(
                     status=RunStatus.FAILED.value,
-                    completed_at=datetime.utcnow(),
+                    completed_at=datetime.now(timezone.utc),
                     error_message=reason,
                 )
             )
@@ -217,7 +225,7 @@ class FactoryRunner:
                 .where(FactoryRun.id == run_id)
                 .values(
                     status=RunStatus.COMPLETED.value,
-                    completed_at=datetime.utcnow(),
+                    completed_at=datetime.now(timezone.utc),
                 )
             )
         logger.info("factory_run_completed", run_id=str(run_id))
@@ -277,24 +285,33 @@ class FactoryRunner:
                 raise ValueError(f"Run {run_id} not found")
 
         answers_file = Path(run.project_dir) / "artifacts" / "reports" / "clarification-answers.json"
-        answers_file.parent.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(answers_file.parent.mkdir, parents=True, exist_ok=True)
 
-        # Load existing answers
-        existing = []
-        if answers_file.exists():
+        def _write_answer() -> None:
+            """Atomic read-modify-write for clarification answers."""
+            existing = []
+            if answers_file.exists():
+                try:
+                    existing = json.loads(answers_file.read_text())
+                except json.JSONDecodeError:
+                    existing = []
+            existing.append({
+                "question_id": question_id,
+                "answer": answer,
+                "answered_at": datetime.now(timezone.utc).isoformat(),
+            })
+            # Atomic write via temp file + rename
+            import tempfile
+            fd, tmp_path = tempfile.mkstemp(dir=str(answers_file.parent), suffix=".tmp")
             try:
-                existing = json.loads(answers_file.read_text())
-            except json.JSONDecodeError:
-                existing = []
+                with os.fdopen(fd, "w") as f:
+                    json.dump(existing, f, indent=2)
+                os.replace(tmp_path, str(answers_file))
+            except Exception:
+                os.unlink(tmp_path)
+                raise
 
-        # Add new answer
-        existing.append({
-            "question_id": question_id,
-            "answer": answer,
-            "answered_at": datetime.utcnow().isoformat(),
-        })
-
-        answers_file.write_text(json.dumps(existing, indent=2))
+        await asyncio.to_thread(_write_answer)
         logger.info("clarification_answered", run_id=str(run_id), question_id=question_id)
 
     async def list_tmux_sessions(self) -> list[str]:
@@ -319,7 +336,7 @@ class FactoryRunner:
 
     async def _create_project_dir(self, project_dir: Path) -> None:
         """Create the project directory structure."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._create_project_dir_sync, project_dir)
 
     def _create_project_dir_sync(self, project_dir: Path) -> None:
@@ -345,7 +362,7 @@ class FactoryRunner:
         dest = project_dir / config_file
 
         if source.exists():
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, shutil.copy2, str(source), str(dest))
             logger.debug("engine_config_copied", engine=engine, dest=str(dest))
         else:
@@ -356,14 +373,16 @@ class FactoryRunner:
         raw_input_path = project_dir / "artifacts" / "requirements" / "raw-input.md"
         content = f"# {project.name}\n\n{project.requirements}"
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, raw_input_path.write_text, content)
 
     async def _start_tmux_session(
         self, session_name: str, project_dir: Path, engine: str
     ) -> None:
         """Create a tmux session and start the factory command."""
-        command = ENGINE_COMMANDS.get(engine, f"echo 'Unknown engine: {engine}'")
+        if engine not in ENGINE_COMMANDS:
+            raise ValueError(f"Unknown engine: {engine}")
+        command = ENGINE_COMMANDS[engine]
 
         # Create tmux session
         proc = await asyncio.create_subprocess_exec(

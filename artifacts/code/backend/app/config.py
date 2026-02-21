@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import functools
 from pathlib import Path
 from typing import Any
 
@@ -119,6 +120,7 @@ class Settings(BaseSettings):
         }
 
 
+@functools.lru_cache(maxsize=1)
 def get_settings() -> Settings:
     """Create and return a Settings instance. Cached at module level on first call."""
     return Settings()  # type: ignore[call-arg]

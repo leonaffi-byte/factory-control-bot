@@ -54,8 +54,8 @@ class _AuthHandler(BaseHandler):
 
         user = update.effective_user
         if user is None:
-            # System updates without a user (channel posts, etc.) — allow
-            return
+            # Default-deny: channel posts and system updates without a user are blocked
+            raise ApplicationHandlerStop()
 
         telegram_id = user.id
 

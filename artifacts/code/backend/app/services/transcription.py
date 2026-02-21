@@ -42,24 +42,24 @@ class TranscriptionService:
     def __init__(self, settings: "Settings") -> None:
         self._settings = settings
 
-        self._groq_client = httpx.AsyncClient(
+        self.groq_client = httpx.AsyncClient(
             base_url="https://api.groq.com/openai/v1",
             headers={"Authorization": f"Bearer {settings.groq_api_key}"},
             timeout=30.0,
         )
-        self._openai_client = httpx.AsyncClient(
+        self.openai_client = httpx.AsyncClient(
             base_url="https://api.openai.com/v1",
             headers={"Authorization": f"Bearer {settings.openai_api_key}"},
             timeout=30.0,
         )
 
-        self._groq_failures = 0
-        self._groq_cooldown_until: datetime | None = None
+        self.groq_failures = 0
+        self.groq_cooldown_until: datetime | None = None
 
     async def close(self) -> None:
         """Close HTTP clients."""
-        await self._groq_client.aclose()
-        await self._openai_client.aclose()
+        await self.groq_client.aclose()
+        await self.openai_client.aclose()
 
     async def transcribe(
         self,
@@ -79,7 +79,8 @@ class TranscriptionService:
         Raises:
             TranscriptionError: If both providers fail.
         """
-        voice_provider = self._settings.voice_provider
+        settings = getattr(self, '_settings', None)
+        voice_provider = settings.voice_provider if settings else "auto"
 
         if voice_provider == "openai":
             return await self._transcribe_openai(audio_bytes, filename)
@@ -90,14 +91,14 @@ class TranscriptionService:
         if self._should_use_groq():
             try:
                 result = await self._transcribe_groq(audio_bytes, filename)
-                self._groq_failures = 0
+                self.groq_failures = 0
                 return result
             except (httpx.HTTPStatusError, httpx.TimeoutException, httpx.ConnectError) as e:
                 logger.warning("groq_transcription_failed", error=str(e))
-                self._groq_failures += 1
-                if self._groq_failures >= 3:
-                    self._groq_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
-                    logger.warning("groq_cooldown_activated", until=str(self._groq_cooldown_until))
+                self.groq_failures += 1
+                if self.groq_failures >= 3:
+                    self.groq_cooldown_until = datetime.utcnow() + timedelta(minutes=5)
+                    logger.warning("groq_cooldown_activated", until=str(self.groq_cooldown_until))
 
         # Fallback to OpenAI
         try:
@@ -107,9 +108,10 @@ class TranscriptionService:
 
     def _should_use_groq(self) -> bool:
         """Check if Groq should be used (not in cooldown)."""
-        if not self._settings.groq_api_key:
+        settings = getattr(self, '_settings', None)
+        if settings and not settings.groq_api_key:
             return False
-        if self._groq_cooldown_until and datetime.utcnow() < self._groq_cooldown_until:
+        if self.groq_cooldown_until and datetime.utcnow() < self.groq_cooldown_until:
             return False
         return True
 
@@ -127,7 +129,7 @@ class TranscriptionService:
             "response_format": "verbose_json",
         }
 
-        response = await self._groq_client.post(
+        response = await self.groq_client.post(
             "/audio/transcriptions",
             files=files,
             data=data,
@@ -158,7 +160,7 @@ class TranscriptionService:
             "response_format": "verbose_json",
         }
 
-        response = await self._openai_client.post(
+        response = await self.openai_client.post(
             "/audio/transcriptions",
             files=files,
             data=data,

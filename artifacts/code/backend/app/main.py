@@ -63,7 +63,7 @@ async def run_migrations(settings: Settings) -> None:
     alembic_cfg.set_main_option("sqlalchemy.url", settings.sync_database_url)
 
     # Run upgrade in a thread to avoid blocking the event loop
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     await loop.run_in_executor(None, command.upgrade, alembic_cfg, "head")
     logger.info("alembic_migrations_complete")
 
@@ -226,9 +226,6 @@ def main() -> None:
 
     # Build the PTB application
     application = build_application(settings, post_init=post_init, post_shutdown=post_shutdown)
-
-    # Handle graceful shutdown signals
-    loop = asyncio.new_event_loop()
 
     # Run the bot with polling
     application.run_polling(
