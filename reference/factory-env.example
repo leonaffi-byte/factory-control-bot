@@ -1,0 +1,25 @@
+# ═══════════════════════════════════════════════════════════════
+# BLACK BOX FACTORY v2 — API Keys
+# Fill in your keys below, then run install/setup.sh
+# ═══════════════════════════════════════════════════════════════
+
+# Google AI Studio — https://aistudio.google.com/apikey
+# Used by: Gemini CLI, zen MCP for Gemini models
+export GOOGLE_API_KEY=EXAMPLE_KEY
+# OpenRouter — https://openrouter.ai/settings/keys
+# Used by: zen MCP for GPT, O3, Qwen, GLM, Claude (API)
+export OPENROUTER_API_KEY=EXAMPLE_KEY
+
+# Perplexity — https://perplexity.ai/settings/api
+# Used by: Perplexity MCP for sourced research
+export PERPLEXITY_API_KEY=EXAMPLE_KEY
+
+# GitHub Fine-Grained PAT — https://github.com/settings/tokens
+# Permissions needed: Administration (R+W), Contents (R+W), Issues (R+W), Metadata (R)
+export GITHUB_TOKEN=EXAMPLE_KEY
+
+# Telegram Bot Token (optional) — talk to @BotFather
+# export TELEGRAM_BOT_TOKEN=EXAMPLE_KEY
+
+# Your GitHub username
+export GITHUB_USER=EXAMPLE_KEY
