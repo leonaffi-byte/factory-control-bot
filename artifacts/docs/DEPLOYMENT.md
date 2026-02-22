@@ -16,7 +16,8 @@ This guide covers all deployment options for Factory Control Bot v2.0, including
 8. [API Keys Reference](#api-keys-reference)
 9. [Health Monitoring](#health-monitoring)
 10. [Backup and Maintenance](#backup-and-maintenance)
-11. [Troubleshooting](#troubleshooting)
+11. [Security Hardening](#security-hardening)
+12. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -514,6 +515,12 @@ This will:
 
 At the end, it prints the generated database password — save it.
 
+After installing, harden your VPS:
+```bash
+sudo bash /home/factory/factory-control-bot/artifacts/release/secure.sh
+```
+See the [Security Hardening](#security-hardening) section below for details.
+
 ### Alternative: If You Already Have the Repo
 
 If you've already cloned the repository:
@@ -813,6 +820,105 @@ sudo systemctl restart factory-bot factory-worker
 ```bash
 factory update            # Full update
 factory update --engines-only  # Update only engine CLIs
+```
+
+---
+
+## Security Hardening
+
+After deploying with `install.sh` or any manual method, run the security hardening script to lock down your VPS.
+
+### Quick Start
+
+```bash
+sudo bash /home/factory/factory-control-bot/artifacts/release/secure.sh
+```
+
+Or directly from GitHub:
+```bash
+curl -fsSL https://raw.githubusercontent.com/leonaffi-byte/factory-control-bot/main/artifacts/release/secure.sh | sudo bash
+```
+
+### What It Does
+
+| Step | Description | Skip Flag |
+|------|-------------|-----------|
+| 1. System updates | `apt upgrade`, installs base packages | `--skip-updates` |
+| 2. SSH hardening | Disable root login, key-only auth, `MaxAuthTries 3` | `--skip-ssh` |
+| 3. UFW firewall | Default deny incoming, allow SSH/HTTP/HTTPS/Tailscale | `--skip-ufw` |
+| 4. fail2ban | SSH jail: 5 retries, 1h ban, 10m find window | `--skip-fail2ban` |
+| 5. Tailscale | Install + authenticate, optional Tailscale-only SSH | `--skip-tailscale` |
+| 6. Kernel hardening | SYN cookies, no ICMP redirects, reverse path filtering | `--skip-kernel` |
+| 7. Shared memory | `/run/shm` with `nosuid,noexec,nodev` | `--skip-shm` |
+| 8. Auto updates | `unattended-upgrades` for security patches | `--skip-unattended` |
+| 9. Docker hardening | Log rotation, `no-new-privileges`, no userland proxy | `--skip-docker-harden` |
+
+### Skipping Steps
+
+Skip any step with `--skip-<name>` flags:
+
+```bash
+# Skip Tailscale and SSH port change
+sudo bash secure.sh --skip-tailscale --skip-ssh-port
+
+# Only SSH + firewall (skip everything else)
+sudo bash secure.sh --skip-updates --skip-fail2ban --skip-tailscale \
+    --skip-kernel --skip-shm --skip-unattended --skip-docker-harden
+```
+
+### SSH Lockout Protection
+
+The script checks for existing SSH `authorized_keys` before disabling password authentication. If no keys are found, password auth is left **enabled** and a warning is printed. Add your SSH key first:
+
+```bash
+# On your local machine
+ssh-copy-id user@your-vps-ip
+
+# Then re-run secure.sh to disable password auth
+sudo bash secure.sh --skip-updates --skip-ufw --skip-fail2ban \
+    --skip-tailscale --skip-kernel --skip-shm --skip-unattended --skip-docker-harden
+```
+
+### Tailscale-Only SSH (Zero Trust)
+
+During Tailscale setup, the script offers to remove the public SSH port from UFW entirely. With this option:
+- SSH is only accessible via Tailscale network
+- The public SSH port is closed in the firewall
+- Tailscale SSH provides identity-based authentication
+
+To set this up later:
+```bash
+sudo tailscale up --ssh
+sudo ufw delete allow 22/tcp
+```
+
+### Config Backups
+
+All modified config files are backed up before changes with a `.bak.<timestamp>` suffix:
+- `/etc/ssh/sshd_config.bak.20260221120000`
+- `/etc/fail2ban/jail.local.bak.20260221120000`
+- `/etc/sysctl.d/99-factory-hardening.conf.bak.20260221120000`
+- etc.
+
+To revert any change, copy the backup over the modified file and restart the relevant service.
+
+### Verifying Hardening
+
+```bash
+# Check UFW status
+sudo ufw status verbose
+
+# Check fail2ban status
+sudo fail2ban-client status sshd
+
+# Check sshd config
+sudo sshd -T | grep -E 'permitroot|passwordauth|maxauth|port'
+
+# Check Tailscale
+tailscale status
+
+# Check kernel params
+sysctl net.ipv4.tcp_syncookies net.ipv4.conf.all.rp_filter net.ipv4.conf.all.accept_redirects
 ```
 
 ---
