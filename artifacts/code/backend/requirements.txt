@@ -28,3 +28,7 @@ aiofiles>=23.2.0,<24
 
 # Fast JSON
 orjson>=3.10.0,<4
+
+# CLI
+typer[all]>=0.12.0,<1
+rich>=13.7.0,<14
